@@ -1,102 +1,41 @@
-# RICs platform
-Use the Experiment folder to store all the code form the client and server.
+# Deployment e Testing Automatizzato di rApp e xApp in O-RAN
 
-Use the Thesis folder to store images, graphs and the final version of the thesis file and presentation.
+Questo repository contiene il codice e la documentazione relativi al progetto di tesi triennale in Ingegneria Informatica presso l'Università di Bologna (A.A. 2024-2025). Il progetto si focalizza sull'automazione del ciclo di vita dei componenti chiave dell'architettura O-RAN utilizzando metodologie DevOps.
 
-Use the Test directory to store the data produced in the tests in a csv format and the scripts employed to collect data.
+## 📌 Descrizione del Progetto
+[cite_start]L'obiettivo principale è superare le complessità e la rigidità delle reti RAN tradizionali ("black-box") adottando il paradigma **Open Radio Access Network (O-RAN)**[cite: 371, 372]. La tesi propone una pipeline di automazione basata su **Ansible** per gestire il deployment e il testing di:
+* [cite_start]**Non-Real Time RIC** (Nodo di Controllo)[cite: 374, 377].
+* [cite_start]**Near-Real Time RIC**[cite: 374, 377].
+* [cite_start]**rApp** e **xApp** (Applicazioni intelligenti per l'ottimizzazione della rete)[cite: 375, 377].
 
-Eventually add other directories when needed and provide information about the content in this readme.
-Providing information in readme files about the project structure and contained documents is appreciated.
+## 🏗️ Architettura del Sistema
+[cite_start]Il sistema è implementato su tre macchine virtuali che riflettono il modello **Cloud-Edge Continuum**[cite: 85, 86, 109]:
+1. [cite_start]**Nodo Non-RT RIC**: Funge da *Control Node* dell'automazione, ospitando Ansible e gestendo l'orchestrazione degli altri nodi[cite: 106, 109].
+2. [cite_start]**Nodo Near-RT RIC**: Nodo gestito che opera in tempo quasi reale[cite: 87, 109].
+3. [cite_start]**Nodo SMO (Service Management and Orchestration)**: Gestisce l'orchestrazione principale del servizio[cite: 96, 109].
 
+[cite_start]L'ambiente Kubernetes è gestito tramite **K3s**, scelto per la sua leggerezza in ambienti distribuite[cite: 85].
 
+## 🛠️ Tecnologie e Strumenti
+* [cite_start]**Automazione**: Ansible (Playbooks e Inventory)[cite: 107].
+* [cite_start]**Orchestrazione Container**: Kubernetes (K3s), Helm[cite: 118, 129].
+* [cite_start]**Repository**: ChartMuseum per la gestione dei chart Helm[cite: 118, 129].
+* [cite_start]**Framework O-RAN**: Software della O-RAN Software Community (O-RAN SC)[cite: 110, 113].
+* [cite_start]**Comunicazione**: Interfaccia A1 per lo scambio di policy tra i RIC[cite: 73, 120].
 
+## 📂 Struttura dei Playbook
+[cite_start]L'automazione è divisa in tre fasi principali per ciascun nodo[cite: 117, 128]:
+* [cite_start]**Installazione Ambiente**: Setup di K3s, Helm, E2 Simulator e componenti core del RIC[cite: 118, 129].
+* [cite_start]**Verifica Connettività A1**: Validazione della comunicazione tra Non-RT RIC e Near-RT RIC[cite: 120, 131].
+* [cite_start]**Deployment Applicazioni**: Onboarding e installazione automatica di rApp (su Non-RT RIC) e xApp (su Near-RT RIC)[cite: 124, 134].
 
-## Getting started
+## 📊 Risultati
+[cite_start]L'analisi comparativa ha dimostrato una chiara superiorità della procedura automatizzata[cite: 290]:
+* [cite_start]**Efficienza**: Il deployment del Non-RT RIC ha mostrato un risparmio medio di oltre **80 secondi** rispetto alla procedura manuale[cite: 292].
+* [cite_start]**Affidabilità**: Una volta superata l'anomalia iniziale, la varianza dei tempi di esecuzione automatizzata è risultata significativamente inferiore, garantendo stabilità e prevedibilità[cite: 295, 296, 298].
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
-```
-cd existing_repo
-git remote add origin https://gitlab.com/MMw_Unibo/bachelor-theses/2024-2025/rics-platform.git
-git branch -M main
-git push -uf origin main
-```
-
-## Integrate with your tools
-
-- [ ] [Set up project integrations](https://gitlab.com/MMw_Unibo/bachelor-theses/2024-2025/rics-platform/-/settings/integrations)
-
-## Collaborate with your team
-
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+## 🎓 Crediti
+* [cite_start]**Candidato**: Meriem Laaouaj [cite: 349]
+* [cite_start]**Relatore**: Ch.mo Prof. Paolo Bellavista [cite: 343]
+* [cite_start]**Correlatore**: Dott.ssa Sofia Montebugnoli [cite: 345]
+* [cite_start]**Università**: Alma Mater Studiorum - Università di Bologna [cite: 337]
