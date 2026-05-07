@@ -1,0 +1,180 @@
+---
+- name: Deployment del Near-RT RIC
+  hosts: nearrtric
+  become: yes
+
+  vars:
+    docker_username: "merilaaouaj"
+    docker_registry: "nexus3.o-ran-sc.org:10002"
+    ric_version: "1.2.0"
+
+  tasks:
+    - name: Aggiorna i pacchetti di sistema
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Installa pacchetti essenziali per il deployment
+      ansible.builtin.apt:
+        name:
+          - curl
+          - git
+          - build-essential
+          - cmake
+          - libsctp-dev
+          - lksctp-tools
+          - autoconf
+          - automake
+          - libtool
+          - bison
+          - flex
+          - libboost-all-dev
+          - make
+        state: present
+
+    # ---- Kernel -----
+    - name: Aggiunge l'utente 'default' al gruppo 'docker'
+      ansible.builtin.user:
+        name: default
+        groups: docker
+        append: yes
+
+    - name: Installa il kernel generico necessario per SCTP
+      ansible.builtin.apt:
+        name:
+          - "linux-image-5.19.0-41-generic"
+          - "linux-headers-5.19.0-41-generic"
+        state: present
+
+    - name: Riavvia il sistema per applicare le modifiche al kernel
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+
+    - name: Assicura che il modulo sctp sia caricato
+      ansible.builtin.modprobe:
+        name: sctp
+        state: present
+
+    # ---- E2 Simulator ----
+    - name: Costruisce il pacchetto e2sim
+      ansible.builtin.command:
+        cmd: "make package"
+      args:
+        chdir: "/home/default/sim-e2-interface/e2sim/build"
+
+    - name: Copia il pacchetto .deb
+      ansible.builtin.shell: cp /home/default/sim-e2-interface/e2sim/build/*.deb /home/default/sim-e2-interface/e2sim/e2sm_examples/kpm_e2sm/
+
+    # ---- K3s ----
+    - name: Esegue l'installazione di K3s
+      ansible.builtin.shell: curl -sfL https://get.k3s.io | sh -
+      args:
+         creates: /usr/local/bin/k3s
+
+    - name: Impostare permessi Kubeconfig
+      ansible.builtin.file:
+        path: /etc/rancher/k3s/k3s.yaml
+        owner: default
+        group: default
+        mode: '0644'
+
+    - name: Esporta la variabile KUBECONFIG
+      ansible.builtin.shell: "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml"
+      become: yes
+
+#    - name: Pausa per 30 secondi per consentire l'avvio di K3s
+ #     ansible.builtin.pause:
+  #      seconds: 30
+
+    - name: Ottieni lo stato del servizio k3s
+      ansible.builtin.command: systemctl status k3s
+      register: k3s_status
+      ignore_errors: yes
+
+    - name: Stampa lo stato di K3s
+      ansible.builtin.debug:
+        msg: |
+          Stato del servizio k3s su {{ ansible_hostname }}:
+          ------------------------------------------
+          {{ k3s_status.stdout }}
+          {{ k3s_status.stderr }}
+
+    # ---- Helm ----
+    - name: Installa Helm
+      ansible.builtin.shell: |
+        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        chmod 700 get_helm.sh
+        ./get_helm.sh
+      args:
+        chdir: /tmp
+        warn: false
+
+    # ---- ChartMuseum ----
+    - name: Installa Chart Museum
+      ansible.builtin.shell: |
+        curl https://raw.githubusercontent.com/helm/chartmuseum/main/scripts/get-chartmuseum | bash
+      args:
+        warn: false
+
+    - name: Installa il plugin Helm Push
+      ansible.builtin.command: "helm plugin install https://github.com/chartmuseum/helm-push"
+      args:
+        warn: false
+      changed_when: "'Error: plugin already exists' not in helm_push.stderr"
+      register: helm_push
+      failed_when: "'Error: plugin already exists' not in helm_push.stderr and helm_push.rc != 0"
+      ignore_errors: true
+
+    - name: Avvia Chart Museum in background
+      ansible.builtin.shell: |
+        mkdir -p $HOME/helm/chartsmuseum/
+        nohup chartmuseum --debug --port 6873 --storage local --storage-local-rootdir $HOME/helm/chartsmuseum/ > /dev/null 2>&1 &
+      args:
+        warn: false
+      become: yes
+
+    - name: Attende che Chart Museum sia pronto
+      ansible.builtin.wait_for:
+        port: 6873
+        timeout: 30
+
+    # ---- RIC ----
+    - name: Crea i namespace del RIC
+      ansible.builtin.command: "kubectl create namespace {{ item }}"
+      loop:
+        - ricplt
+        - ricxapp
+      ignore_errors: true
+
+    - name: Aggiunge i repository Helm
+      ansible.builtin.command: "helm repo add {{ item.name }} {{ item.url }}"
+      loop:
+        - { name: 'local', url: 'http://localhost:6873/' }
+        - { name: 'influxdata', url: 'https://helm.influxdata.com' }
+
+    - name: Aggiorna i repository Helm
+      ansible.builtin.command: "helm repo update"
+
+    - name: Costruisce i chart Helm del RIC
+      ansible.builtin.command:
+        cmd: "make nearrtric"
+      args:
+        chdir: "/home/default/ric-plt-ric-dep/new-installer/helm/charts/"
+
+    - name: Installa il RIC con Helm
+      ansible.builtin.command:
+        cmd: "helm install nearrtric ./new-installer/helm/charts/nearrtric -f ./new-installer/helm-overrides/nearrtric/minimal-nearrt-ric.yaml -n ricplt --kubeconfig /etc/rancher/k3s/k3s.yaml"
+      args:
+        chdir: "/home/default/ric-plt-ric-dep"
+
+    - name: Avvia il container per l'e2 simulator
+      ansible.builtin.command:
+        cmd: "docker run -d {{ docker_username }}/e2sim:latest"
+
+    - name: Verifica lo stato dei pod del RIC
+      ansible.builtin.command:
+        cmd: "kubectl get pods -A"
+      register: ric_pods_status
+
+    - name: Stampa lo stato dei pod
+      ansible.builtin.debug:
+        var: ric_pods_status.stdout_lines

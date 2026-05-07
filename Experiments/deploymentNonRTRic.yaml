@@ -1,0 +1,174 @@
+---
+- name: Full nonrtric environment deployment
+  hosts: nonrtric
+  become: yes
+  vars:
+    kubeconfig_path: "/etc/rancher/k3s/k3s.yaml"
+    scripts_dir: "/home/default/it-dep/smo-install/scripts"
+    namespace: "nonrtric"
+    helm_release_name: "nonrtric"
+    expected_pods: 5
+
+  tasks:
+    - name: Download the K3s installation script
+      ansible.builtin.get_url:
+        url: https://get.k3s.io
+        dest: /tmp/install-k3s.sh
+        mode: '0755'
+      tags:
+        - install_k3s
+
+    - name: Run the K3s installation script
+      ansible.builtin.shell: /tmp/install-k3s.sh
+      args:
+        creates: /etc/rancher/k3s/k3s.yaml
+      tags:
+        - install_k3s
+
+    - name: Wait for K3s to start and be ready
+      ansible.builtin.pause:
+        seconds: 5
+      tags:
+        - install_k3s
+
+    - name: Set KUBECONFIG variable for future tasks
+      ansible.builtin.set_fact:
+        env_vars:
+          KUBECONFIG: "{{ kubeconfig_path }}"
+      tags:
+        - install_k3s
+
+    - name: Change permissions and ownership of K3s config file
+      ansible.builtin.file:
+        path: "{{ kubeconfig_path }}"
+        mode: '0644'
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+      tags:
+        - install_k3s
+
+    - name: Download ChartMuseum
+      ansible.builtin.get_url:
+        url: "https://get.helm.sh/chartmuseum-v0.13.1-linux-amd64.tar.gz"
+        dest: "{{ scripts_dir }}/layer-0/chartmuseum-v0.13.1-linux-amd64.tar.gz"
+        mode: '0644'
+      tags:
+        - setup_charts_museum
+
+    - name: Extract ChartMuseum tarball
+      ansible.builtin.unarchive:
+        src: "{{ scripts_dir }}/layer-0/chartmuseum-v0.13.1-linux-amd64.tar.gz"
+        dest: "{{ scripts_dir }}/layer-0"
+        remote_src: yes
+      tags:
+        - setup_charts_museum
+
+    - name: Create charts directory
+      ansible.builtin.file:
+        path: "{{ scripts_dir }}/layer-0/charts"
+        state: directory
+        mode: '0755'
+      tags:
+        - setup_charts_museum
+
+    - name: Run ChartMuseum as a background process
+      ansible.builtin.shell: |
+        nohup ./linux-amd64/chartmuseum --port=18080 --storage="local" --storage-local-rootdir="./charts" > /dev/null 2>&1 &
+      args:
+        chdir: "{{ scripts_dir }}/layer-0"
+        creates: "{{ scripts_dir }}/layer-0/nohup.out"
+      tags:
+        - setup_charts_museum
+
+    - name: Add local Helm repository
+      ansible.builtin.shell: "helm repo add local http://localhost:18080"
+      environment: "{{ env_vars }}"
+      tags:
+        - setup_charts_museum
+
+    - name: Update Helm repositories
+      ansible.builtin.shell: "helm repo update"
+      environment: "{{ env_vars }}"
+      tags:
+        - setup_charts_museum
+
+    - name: Run setup scripts in layer-0
+      ansible.builtin.shell: "{{ item.script }}"
+      args:
+        chdir: "{{ scripts_dir }}/layer-0"
+      environment: "{{ env_vars }}"
+      loop:
+        - { script: "./0-setup-helm3.sh" }
+        - { script: "./0-setup-charts-museum.sh" }
+      become: yes
+      tags:
+        - setup_layer0
+
+    - name: Build all charts in layer-1
+      ansible.builtin.shell: "{{ scripts_dir }}/layer-1/1-build-all-charts.sh"
+      args:
+        chdir: "{{ scripts_dir }}/layer-1"
+      environment: "{{ env_vars }}"
+      become: yes
+      tags:
+        - setup_layer1
+
+    - name: Delete all existing deployments and statefulsets in nonrtric namespace
+      ansible.builtin.shell: "kubectl delete all -l app.kubernetes.io/instance={{ helm_release_name }} -n {{ namespace }} --ignore-not-found"
+      environment: "{{ env_vars }}"
+      become: yes
+      tags:
+        - cleanup_layer2
+
+    - name: Delete any stuck PVCs in nonrtric namespace
+      ansible.builtin.shell: "kubectl delete pvc --all -n {{ namespace }} --force --grace-period=0 --ignore-not-found"
+      environment: "{{ env_vars }}"
+      become: yes
+      tags:
+        - cleanup_layer2
+
+    - name: Delete any remaining PVs
+      ansible.builtin.shell: "kubectl delete pv --all --ignore-not-found"
+      environment: "{{ env_vars }}"
+      become: yes
+      tags:
+        - cleanup_layer2
+
+    - name: Install nonrtric components in layer-2
+      ansible.builtin.shell: "{{ scripts_dir }}/layer-2/2-install-nonrtric-only.sh"
+      args:
+        chdir: "{{ scripts_dir }}/layer-2"
+      environment: "{{ env_vars }}"
+      register: install_output
+      become: yes
+      tags:
+        - install_layer2
+      timeout: 60
+      ignore_errors: true
+
+    - name: Wait for all pods to be ready (using kubectl)
+      ansible.builtin.shell: |
+        kubectl get pods -n {{ namespace }} | grep -c 'Running'
+      environment: "{{ env_vars }}"
+      register: running_pods_count
+      until: "running_pods_count.stdout | int >= {{ expected_pods }}"
+      retries: 60
+      delay: 10
+      tags:
+        - verify_deployment
+      when: not ansible_check_mode
+
+    - name: Final status check of pods
+      ansible.builtin.command: "kubectl get pods -n {{ namespace }}"
+      environment: "{{ env_vars }}"
+      register: final_status
+      tags:
+        - verify_deployment
+      when: not ansible_check_mode
+
+    - name: Display final pod status
+      ansible.builtin.debug:
+        var: final_status.stdout_lines
+      tags:
+        - verify_deployment
+      when: not ansible_check_mode

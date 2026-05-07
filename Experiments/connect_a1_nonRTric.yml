@@ -1,0 +1,65 @@
+---
+- name: 1. Riavvio Pulito del Container Policy-Agent
+  hosts: nonrtric
+  gather_facts: no
+
+  tasks:
+    - name: Ferma il container policy-agent
+      community.docker.docker_container:
+        name: policy-agent
+        state: stopped
+        # (ignora eventuali errori se il container non è in esecuzione)
+      ignore_errors: true
+
+    - name: Rimuovi il container policy-agent
+      community.docker.docker_container:
+        name: policy-agent
+        state: absent
+
+- name: 2. Avvia il Container e Verifica la Connessione
+  hosts: nonrtric
+  gather_facts: no
+  vars:
+    nearrtric_ip: "192.168.17.51"
+    nearrtric_port: "30476"
+    nonrtric_image: "nexus3.o-ran-sc.org:10002/o-ran-sc/nonrtric-plt-a1policymanagementservice:2.9.0"
+
+  tasks:
+    - name: Avvia il container policy-agent con la configurazione aggiornata
+      community.docker.docker_container:
+        name: policy-agent
+        image: "{{ nonrtric_image }}"
+        ports:
+          - "8081:8081"
+          - "8433:8433"
+        env:
+          A1_MEDIATOR_URL: "http://{{ nearrtric_ip }}:{{ nearrtric_port }}"
+        volumes:
+          - "~/policy-agent-custom-config/data:/opt/app/policy-agent/data:ro"
+        state: started
+
+    - name: Verifica che il RIC sia AVAILABLE
+      ansible.builtin.uri:
+        url: http://localhost:8081/a1-policy/v2/rics
+        method: GET
+        return_content: yes
+      register: ric_status_response
+      until: "'\"state\":\"AVAILABLE\"' in ric_status_response.content"
+      retries: 10
+      delay: 10 # Attende 10 secondi per consentire il completo avvio del container
+
+    - name: Stampa lo stato del RIC
+      ansible.builtin.debug:
+        msg: "Connessione a Near-RT RIC riuscita. Stato: {{ ric_status_response.content }}"
+      when: "'\"state\":\"AVAILABLE\"' in ric_status_response.content"
+
+    - name: Verifica la visibilità delle policy dal Non-RT RIC
+      ansible.builtin.uri:
+        url: http://localhost:8081/a1-policy/v2/policy-types
+        method: GET
+        return_content: yes
+      register: policy_types_response
+
+    - name: Stampa le policy visibili
+      ansible.builtin.debug:
+        msg: "Le seguenti policy sono visibili: {{ policy_types_response.content | from_json }}"

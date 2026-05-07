@@ -1,0 +1,58 @@
+---
+- name: Verify A1 Policy Management with Variables
+  hosts: nearrtric
+  become: yes
+
+  vars:
+    policy_type_id: 10000
+    policy_instance_name: "threshold-policy-instance-001"
+    threshold_value: 80
+    a1_mediator_url: "http://192.168.17.51:30476"
+
+  tasks:
+    - name: Create a new policy type (ID {{ policy_type_id }})
+      ansible.builtin.uri:
+        url: "{{ a1_mediator_url }}/a1-p/policytypes/{{ policy_type_id }}"
+        method: PUT
+        headers:
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          policy_type_id: "{{ policy_type_id }}"
+          name: "threshold-policy"
+          description: "Simple threshold policy type"
+          create_schema:
+            type: "object"
+            properties:
+              threshold:
+                type: "number"
+            required:
+              - "threshold"
+        status_code: [200, 201]
+      register: create_policy_type_result
+      failed_when: create_policy_type_result.status not in [200, 201]
+
+    - name: Create a new policy instance for policy type {{ policy_type_id }}
+      ansible.builtin.uri:
+        url: "{{ a1_mediator_url }}/a1-p/policytypes/{{ policy_type_id }}/policies/{{ policy_instance_name }}"
+        method: PUT
+        headers:
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          threshold: "{{ threshold_value }}"
+        status_code: [202]
+      register: create_policy_instance_result
+      failed_when: create_policy_instance_result.status != 202
+
+    - name: Get all policy types from the Near-RT RIC
+      ansible.builtin.uri:
+        url: "{{ a1_mediator_url }}/a1-p/policytypes"
+        method: GET
+        headers:
+          Content-Type: "application/json"
+      register: get_policy_types_result
+
+    - name: Print the policy types
+      ansible.builtin.debug:
+        msg: "Policies retrieved from Near-RT RIC: {{ get_policy_types_result.json }}"

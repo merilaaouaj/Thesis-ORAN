@@ -1,0 +1,138 @@
+---
+- name: Deployment and activation of hw-python xApp on RIC
+  hosts: nearrtric
+
+  vars:
+    xapp_base_path: "{{ ansible_env.HOME }}/ric-app-hw-python"
+    xapp_init_path: "{{ xapp_base_path }}/init"
+    helm_chart_path: "{{ xapp_init_path }}/hw-python"
+    helm_chart_file: "hw-python-0.1.0.tgz"
+    release_name: "hw-python-release"
+    ric_namespace: "ricxapp"
+    ric_plt_namespace: "ricplt"
+    a1_mediator_url: "http://10.43.73.254:10000"
+    kubeconfig_path: "/etc/rancher/k3s/k3s.yaml"
+    dms_cli_path: "/home/default/.local/bin/dms_cli"
+
+  tasks:
+    - name: Ensure project directories exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ xapp_base_path }}"
+        - "{{ xapp_init_path }}"
+        - "{{ helm_chart_path }}"
+      register: dir_check
+
+    - name: Abort if project directories do not exist
+      ansible.builtin.fail:
+        msg: "Required directories do not exist. Please ensure the project is cloned and structured correctly."
+      when: not dir_check.results | map(attribute='stat.exists') | select('equalto', true) | list | length == 3
+
+    - name: Create Helm chart package (.tgz file)
+      ansible.builtin.command: "helm package {{ helm_chart_path }}"
+      args:
+        chdir: "{{ xapp_init_path }}"
+      register: helm_package_output
+      changed_when: helm_package_output.rc == 0
+
+    - name: Check if the Helm release already exists
+      ansible.builtin.shell: "helm list -n {{ ric_namespace }} | grep {{ release_name }}"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: helm_list_output
+      ignore_errors: true
+
+    - name: Install the Helm release if it doesn't exist
+      ansible.builtin.shell: "helm install {{ release_name }} {{ xapp_init_path }}/{{ helm_chart_file }} -n {{ ric_namespace }}"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      when: helm_list_output.rc != 0
+
+    - name: Upgrade the Helm release if it exists
+      ansible.builtin.shell: "helm upgrade {{ release_name }} {{ xapp_init_path }}/{{ helm_chart_file }} -n {{ ric_namespace }}"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      when: helm_list_output.rc == 0
+
+    - name: Start port-forwarding for xapp-onboarder in the background
+      ansible.builtin.shell: |
+        kubectl port-forward svc/service-ricplt-xapp-onboarder-http 8081:8080 -n {{ ric_plt_namespace }} &
+        echo $! > /tmp/onboarder_port_forward.pid
+      args:
+        chdir: "{{ xapp_init_path }}"
+      changed_when: false
+
+    - name: Wait for port-forward to be ready
+      ansible.builtin.wait_for:
+        port: 8081
+        timeout: 60
+        host: 127.0.0.1
+        state: started
+      delegate_to: localhost
+
+    - name: Onboard the xApp
+      ansible.builtin.shell: "{{ dms_cli_path }} onboard --config_file_path=config-file.json --shcema_file_path=schema.json"
+      environment:
+        CHART_REPO_URL: "http://localhost:8081"
+      args:
+        chdir: "{{ xapp_init_path }}"
+
+    - name: Kill the port-forward process
+      ansible.builtin.shell: |
+        if [ -f /tmp/onboarder_port_forward.pid ]; then
+          kill $(cat /tmp/onboarder_port_forward.pid)
+          rm /tmp/onboarder_port_forward.pid
+        fi
+      changed_when: false
+
+    - name: Wait for the xApp pod to be in a Running state
+      ansible.builtin.shell: "kubectl get pods -n {{ ric_namespace }} | grep {{ release_name }} | grep Running | grep '1/1'"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: pod_status
+      until: pod_status.rc == 0
+      retries: 20
+      delay: 10
+
+    - name: Get the name of the new xApp pod
+      ansible.builtin.shell: "kubectl get pods -n {{ ric_namespace }} -l app.kubernetes.io/instance={{ release_name }} -o jsonpath='{.items[0].metadata.name}'"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: xapp_pod_name
+
+    - name: Log a message about the pod's readiness
+      ansible.builtin.debug:
+        msg: "xApp pod {{ xapp_pod_name.stdout }} is running and ready for policy."
+
+#    - name: Read A1 policy file content
+ #     ansible.builtin.slurp:
+  #      src: "{{ xapp_init_path }}/a1_policy.json"
+   #   register: a1_policy_content
+
+#    - name: Decode A1 policy content
+  #      ansible.builtin.set_fact:
+  #      a1_policy_json: "{{ a1_policy_content.content | b64decode }}"
+
+   # - name: Send the A1 policy to the xApp
+   #  ansible.builtin.uri:
+   #    url: "{{ a1_mediator_url }}/a1-p/policytypes/1/policies/1"
+   #    method: PUT
+    #    body: "{{ a1_policy_json }}"
+     #   body_format: json
+      #  headers:
+       #   Content-Type: "application/json"
+      # register: policy_result
+
+    # - name: Check xApp logs after sending the policy
+    #  ansible.builtin.command: "kubectl logs {{ xapp_pod_name.stdout }} -n {{ ric_namespace }}"
+    #  environment:
+    #    KUBECONFIG: "{{ kubeconfig_path }}"
+    #  register: final_xapp_logs
+
+   # - name: Display final results
+   #   ansible.builtin.debug:
+   #     msg: |
+   #       A1 Policy push result: {{ policy_result.status }}
+   #      Final xApp logs:
+   #      {{ final_xapp_logs.stdout }}

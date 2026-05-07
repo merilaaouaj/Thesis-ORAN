@@ -1,0 +1,45 @@
+---
+- name: Deployment e verifica della rApp
+  hosts: nonrtric
+  become: yes
+  tasks:
+    - name: Verifica se l'immagine Docker della rApp è presente
+      # Utilizza un comando locale per controllare la lista delle immagini.
+      ansible.builtin.command:
+        cmd: "docker images nonrtric-rapp-healthcheck:latest"
+      register: docker_image_check
+      ignore_errors: yes
+
+    - name: Avvia il container della rApp
+      # Avvia il container solo se l'immagine è già stata costruita
+      # Il comando 'docker run -d --name...' è tradotto nel modulo 'docker_container'.
+      ansible.builtin.docker_container:
+        name: rapp-healthcheck-container
+        image: nonrtric-rapp-healthcheck:latest
+        state: started
+        restart_policy: always
+        network_mode: host
+        env:
+          HOST_PORT: "9990"
+      when: docker_image_check.stdout
+
+    - name: Attendi che il servizio della rApp sia disponibile
+      # Questo task attende che la rApp risponda sulla porta 9990.
+      ansible.builtin.wait_for:
+        port: 9990
+        delay: 5
+        timeout: 60
+
+    - name: Verifica che la rApp risponda correttamente
+      # Esegue un GET sulla URL per simulare il 'curl' e controllare che la pagina sia accessibile.
+      # Nota: l'opzione 'validate_certs: no' è inclusa per ambienti di test.
+      ansible.builtin.uri:
+        url: "http://localhost:9990/stats"
+        method: GET
+        status_code: 200
+      register: rapp_response
+
+    - name: Stampa il risultato della verifica
+      # Mostra l'output della richiesta HTTP per confermare l'avvenuto deployment.
+      ansible.builtin.debug:
+        msg: "La rApp risponde correttamente. Contenuto della pagina: {{ rapp_response.status }}"
